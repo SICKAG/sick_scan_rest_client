@@ -1,92 +1,75 @@
-# SRT-REST-Client
+# SICK Scan REST Client
+
+The SICK Scan REST Client shows how to read and write variables and how to call methods via the REST interface of the sensor. Variables are read using GET requests. To write variables and to call methods POST requests are required which can be challenging as the device uses a challenge-response authentication method.
+
+The scripts are not intended to be used in productive code.
+
+# User levels
+The LIDAR device works with different user levels (Maintenance, Authorized Client and Service). By default only user level Service is enabled. If communication via other user levels is desired, they need to be enabled first, e.g. via the UI.
+
+<img src="activate_userlevel.png" alt="drawing" width="200"/>
 
 
+# Challenge-response authentication method
+For sending POST requests to the LIDAR challenge-response authentication is required.
 
-## Getting started
+The challenge-response authentication is a security mechanism that involves the exchange of a challenge and a response between a client and a server. The server (LIDAR) sends a challenge to the client, which the client must respond to with a valid response. The different steps which are required to execute a POST request to write a variable or to call a method are (the code snippets below correspond directly to the variable names in the code):
+1. The client calls the method `getChallenge` of the LIDAR with a POST request. (No authentication is required for the POST request to call that method.) As payload the username for the actual POST request (which requires authentication) is sent.
+2. In the method `getChallenge` the LIDAR generates a random number called nonce.
+3. The LIDAR sends the reply to the `getChallenge` request which contains (among other fields) also the nonce (`chal['challenge']['nonce']`)
+4. The client combines the nonce with the username, the password for that username and also the method or variable name for the actual POST request and encrypts all that information using the SHA256 hash function.
+Some LIDARs also send a salt (contained in `chal['challenge']['salt']`) which is a random number that is appended to the password before it is put in the hash function to make it more difficult for a potential attacker to recover the password from the hash value.
+5. The client generates a request header which contains the response computed in the previous step (`header['response']`) as well as the desired username (`header['user']`) and the fields nonce, opaque and realm from the challenge.
+6. This header (field `requestDict['header']`) is now used in the actual POST request which is sent from the client to the LIDAR. The payload of the request (field `requestDict['data']`) contains the name of the method to be called or the variable to be written as well as the parameters.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+Note that the nonce, i.e. random number which is sent from the LIDAR to the client, changes for every request to prevent a potential attacker to use it to find out the secret password. That means that for each POST request the challenge has to be computed again as described above.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+The sequence diagram below shows the information exchange between the client and the LIDAR sensor.
 
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
-
+```mermaid
+sequenceDiagram
+    participant client as client (web browser / REST client)
+    participant lidar as server (LiDAR)
+    client->>lidar : POST request: getChallenge(userlevel)
+    activate lidar
+    lidar->>lidar: generate nonce
+    lidar->>client: send reply to getChallenge including nonce
+    deactivate lidar
+    activate client
+    client->>client: compute response by hashing all required information
+    client->>client: create header for actual POST request including response
+    client->>lidar: send actual POST request
+    deactivate client
+    lidar->>lidar: check response, if correct, process POST request
 ```
-cd existing_repo
-git remote add origin https://gitlab.sickcn.net/GBC08/development/tools/digitalaccessories/deviceparametrization/SRT-REST-Client.git
-git branch -M main
-git push -uf origin main
-```
 
-## Integrate with your tools
+### Rate Limiting
+Some LIDAR devices have a rate limiting on REST endpoints. That means that the LIDAR does not respond to further requests if there are too many requests in a certain time period, until some time has passed. If you encounter this, slow down the rate at which you access REST endpoints of the LIDAR.
 
-- [ ] [Set up project integrations](https://gitlab.sickcn.net/GBC08/development/tools/digitalaccessories/deviceparametrization/SRT-REST-Client/-/settings/integrations)
-
-## Collaborate with your team
-
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Automatically merge when pipeline succeeds](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing(SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thank you to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
 
 ## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+Poetry is required to install the SICK Scan REST Client. See https://python-poetry.org/docs/ for installation instructions. With poetry installed simple type ```poetry install``` in the directory where the ```pyproject.toml``` file is located. Now the package can be used from the created virtual environment.
 
 ## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+See ```examples/sick_scan_rest_client_example.py``` for a usage example.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+Run the example with ```poetry run python .\examples\sick_scan_rest_client_example.py```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+## Further reading
+A list with available variables and methods which can be addressed via the REST-Interface can be found as openAPI description here:
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+picoScan150: https://www.sick.com/de/en/catalog/digital-services-and-solutions/sick/rest-api-description-picoscan150-openapi-file/p/p678507?tab=downloads
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+multiScan136: https://www.sick.com/de/en/catalog/digital-services-and-solutions/sick/rest-api-description-multiscan136-openapi-file/p/p678669?tab=downloads
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+## Dependencies
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+This module relies on the following dependencies which are downloaded during the build process.
 
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+| Name               | Version  | License-Classifier                   | URL                                                      |
+|--------------------|----------|--------------------------------------|----------------------------------------------------------|
+| certifi            | 2024.2.2 | Mozilla Public License 2.0 (MPL 2.0) | https://github.com/certifi/python-certifi                |
+| charset-normalizer | 3.3.2    | MIT License                          | https://github.com/Ousret/charset_normalizer             |
+| idna               | 3.6      | BSD License                          | https://github.com/kjd/idna                              |
+| requests           | 2.31.0   | Apache Software License              | https://requests.readthedocs.io                          |
+| urllib3            | 2.0.7    | MIT License                          | https://github.com/urllib3/urllib3/blob/main/CHANGES.rst |

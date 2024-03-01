@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "sick_scan_rest_client"
+version = "1.0.0"
+description = "REST-Client to send GET and POST requests for REST API endpoints to the device."
+authors = [
+"Matthias Honal",
+"Alexander Weinmann"
+]
+packages = [{include = "sick_scan_rest_client"}]
+
+[tool.poetry.dependencies]
+python = "^3.7"
+requests = "^2.31.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
