@@ -184,22 +184,21 @@ class RESTClient:
         nonce = chal['challenge']['nonce']
         opaque = chal['challenge']['opaque']
 
-        # compute the response
-        hstr1 = self.username + ":" + realm + ":" + self.password
+        # .encode() returns a bytes representation of the Unicode string
+        # For the password we use __stringToBytes since we allow here 
+        # only characters according to ISO 8859-15 (8Bit per characters)
+        # as input.
+        hstr1 = (self.username + ":" + realm + ":").encode() + self.__stringToBytes(self.password)
         if 'salt' in chal['challenge']:
-            salt = chal['challenge']['salt']
-            # build byte character string (no ASCII!)
-            saltBinary = ''
-            for i in salt:
-                saltBinary = saltBinary + chr(salt[i])
-            hstr1 = hstr1 + ":" + saltBinary
-        ha1 = hashlib.sha256(hstr1.encode()).hexdigest()
+            hstr1 += ":".encode() + bytes(chal['challenge']['salt'])
+        # Get the hashed data as a hex string
+        hash1 = hashlib.sha256(hstr1).hexdigest()
 
         methodType = 'POST'
-        hstr2 = methodType + ":" + itemName
-        ha2 = hashlib.sha256(hstr2.encode()).hexdigest()
-        hstr3 = ha1 + ":" + nonce + ":" + ha2
-        response = hashlib.sha256(hstr3.encode()).hexdigest()
+        hstr2 = (methodType + ":" + itemName).encode()
+        hash2 = hashlib.sha256(hstr2).hexdigest()
+        hstr3 = (hash1 + ":" + nonce + ":" + hash2).encode()
+        response = hashlib.sha256(hstr3).hexdigest()
 
         # fill header
         header = dict()
@@ -209,3 +208,15 @@ class RESTClient:
         header['response'] = response
         header['user'] = self.username
         return header
+
+    def __stringToBytes(self, string:str) -> bytes:
+        """Converts a string to a byte array.
+        To determine the byte value of each character first its unicode value is computed and then the modulo 256 of this value is taken.
+
+        Args:
+            string (str): The string that shall be converted.
+
+        Returns:
+            bytes: The byte representation of the string.
+        """
+        return bytes(map(lambda char: ord(char) % 256, string))
