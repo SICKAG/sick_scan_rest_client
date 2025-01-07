@@ -1,6 +1,6 @@
 include:
   - project: "GBC08/development/devices/shared/devicescripts/bu83_python_pipeline"
-    ref: 0.11.0
+    ref: 0.13.0
     file: "build-template.yaml"
 
 variables:
@@ -8,49 +8,39 @@ variables:
 
   ENABLE_BUILD_PACKAGE: "True"
   ENABLE_PYCODESTYLE: "False"
-  ENABLE_PYLINT: "False"
-  ENABLE_PYTEST: "False"
-  ENABLE_PYTEST_WINDOWS: "False"
+  ENABLE_PYLINT: "False" # We don't want to include pylint because of license issues.
+  ENABLE_PYTEST: "False" # We don't have any tests yet
+  ENABLE_PYTEST_WINDOWS: "False" # We don't have any tests yet
   ENABLE_DEPLOY_TO_ARTIFACTORY: "True"
   ENABLE_GENERATE_DOCS: "False"
   ENABLE_RELEASE_DOCS: "False"
 
-
-  # Vault
-  VAULT_AUTH_ROLE: "gbc08_bu83_readonly"
-  VAULT_SERVER_URL: "https://csxvault.sickcn.net"
-
   POETRY_VERSION: 1.5.1
-
-.inject_secrets:
-  secrets:
-    USER:
-      vault: readonly/builduser/user@GBC08_BU83
-      file: false
-    APITOKEN:
-      vault: readonly/builduser/key@GBC08_BU83
-      file: false
 
 .setup_pypi_mirror:
   before_script:
-    - poetry source add pypi-mirror https://deagxartifactory.sickcn.net/artifactory/api/pypi/pypi/simple --default
-    - poetry source add bu83-pypi https://deagxartifactory.sickcn.net/artifactory/api/pypi/gbc08-pypi-local/simple --secondary
+    - pip install poetry==${POETRY_VERSION}
+    - poetry source add pypi-mirror https://deagxartifactory.sickcn.net/artifactory/api/pypi/pypi/simple --priority primary
+    - poetry lock --no-update
 
-# Override .default_runner_windows job from the python pipeline to extend .default_runner
-.default_runner_windows:
-  tags:
-    - os_windows
-    - type_docker
+
+build_package:
   before_script:
     - !reference [.setup_pypi_mirror, before_script]
 
+pycodestyle:
+  before_script:
+    - !reference [.setup_pypi_mirror, before_script]
 
+pylint:
+  before_script:
+    - !reference [.setup_pypi_mirror, before_script]
 
-# Override .default_runner_linux job from the python pipeline to extend .default_runner
-.default_runner_linux:
-  tags:
-    - type_docker
-    - os_linux
+pytest_linux:
+  before_script:
+    - !reference [.setup_pypi_mirror, before_script]
+
+pytest_windows:
   before_script:
     - !reference [.setup_pypi_mirror, before_script]
 

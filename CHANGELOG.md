@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2025-01-07
+
+## Changed
+
+* Use camel_case for variables, parameters and methods
+
+## Added
+
+* Added an example which demonstrates how to read and write points of a field
+* Added an example which demonstrates how to change the CoLa A/B password
+* Added a method to change the REST password
+
 ## [1.0.1] - 2024-03-14
 
 ### Changed

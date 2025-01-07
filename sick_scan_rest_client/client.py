@@ -1,110 +1,131 @@
 #
-# Copyright (c) 2023 SICK AG
+# Copyright (c) 2023 - 2024 SICK AG
 # SPDX-License-Identifier: MIT
 #
 
-import requests
-import os
+from enum import Enum
+from hashlib import sha256
+import hmac
 import json
-import hashlib
-from typing import Tuple
+import os
+from secrets import token_bytes
+from typing import Tuple, Optional
+
+from Crypto.Cipher import AES
+import requests
+
 
 class RESTClient:
     """Send GET and POST requests to REST API endpoints (variables or methods) to a sensor """
 
+    class UserLevel(Enum):
+        """Enumeration of the user levels"""
+        # pylint: disable=invalid-name
+        # We want to keep the names as they are defined in the devices
+        Run = 0
+        Operator = 1
+        Maintenance = 2
+        AuthorizedClient = 3
+        Service = 4
+        SICKService = 5
+        Production = 6
+        Developer = 7
 
-    def __init__(self, deviceIpAddress:str="192.168.0.1") -> None:
+    def __init__(self, device_ip_address: str = "192.168.0.1") -> None:
         """
         Constructor of the RESTClient
 
         Args:
-            deviceIpAddress (str): IP address of the sensor
+            device_ip_address (str): IP address of the sensor
 
         """
-        self.deviceIpAddress = deviceIpAddress
-        self.webServerSocket = "http://"+self.deviceIpAddress+":80"
-        self.baseUrl = self.webServerSocket + "/api/"
-        self.username=None
-        self.password=None
 
-        os.environ['NO_PROXY'] = self.deviceIpAddress # Disable proxy
+        self.base_url = "http://"+device_ip_address+":80/api/"
+        self.user_level = RESTClient.UserLevel.Run
+        self.password = ""
 
+        os.environ['NO_PROXY'] = device_ip_address  # Disable proxy
 
-    def setUserLevel(self, username:str, password:str) -> bool:
+    def set_user_level(self, user_level: UserLevel, password: str) -> bool:
         """
         Set a user level and the corresponding password for the following requests.
 
         User level and password are checked with the checkPassword method and False
-        is returned if they do not match.
+        is returned if they do not match and the user level is set to the level 'Run'.
 
         Args:
-            username (str): Desired user level
-            password (str): Password for the selected username
+            user_level (str): Desired user level
+            password (str): Password for the selected user level
 
         Returns:
             bool: True if successful, false otherwise
         """
         success = True
-        self.username = username
+        self.user_level = user_level
         self.password = password
-        success, _ = self.__postItem(itemName="checkCredentials", value=None, isMethod=False)
+        success, _ = self.__post_item(item_name="checkCredentials", value=None, is_method=False)
         if not success:
-            self.username = None
-            self.password = None
+            self.user_level = RESTClient.UserLevel.Run
+            self.password = ""
         return success
 
-
-    def readVariable(self, variableName:str)->Tuple[bool, dict]:
+    def read_variable(self, variable_name: str) -> Tuple[bool, dict]:
         """
         Read a variable from the sensor.
 
         Args:
-            variableName (str): name of the variable
+            variable_name (str): name of the variable
 
         Returns:
             bool: True if successful, false otherwise
             dict: Dictionary with the response from the sensor. The
                   actual variable value is contained in the 'data' field.
         """
-        requestURL = self.baseUrl + variableName
-        response = requests.get(requestURL)
-        success, resultDict = self.__evaluateRestResult(response)
-        return success, resultDict
+        request_url = self.base_url + variable_name
+        response = requests.get(request_url, timeout=5)
+        success, result_dict = self.__evaluate_rest_result(response)
+        return success, result_dict
 
-
-    def writeVariable(self, variableName:str, value:dict)->Tuple[bool, dict]:
+    def write_variable(
+            self,
+            variable_name: str,
+            value: dict) -> Tuple[bool, dict]:
         """
         Write a variable of the sensor.
 
         Args:
-            variableName (str): Name of the variable
+            variable_name (str): Name of the variable
             value (dict): Parameters of the variable, provided as a dictionary
 
         Returns:
             bool: True if successful, false otherwise
             dict: Dictionary with the response from the sensor.
         """
-        return self.__postItem(variableName, value, isMethod = False)
+        return self.__post_item(variable_name, value, False)
 
-
-    def callMethod(self, methodName:str, value:dict)->Tuple[bool, dict]:
+    def call_method(
+            self,
+            method_name: str,
+            value: dict,
+            challenge: Optional[dict] = None) -> Tuple[bool, dict]:
         """
         Call a method of the sensor.
 
         Args:
-            methodName (str): Name of the method
+            method_name (str): Name of the method
             value (dict): Parameters of the method, supplied as a dictionary,
                           or None if the method has no parameters
+            challenge(dict): optional challenge from the sensor.
+            If not provided a new challenge is requested.
 
         Returns:
            bool: True if successful, false otherwise
            dict: Dictionary with the response from the sensor.
         """
-        return self.__postItem(methodName, value, isMethod = True)
+        return self.__post_item(method_name, value, True, challenge)
 
-
-
-    def __postItem(self, itemName:str, value:dict, isMethod:bool) -> Tuple[bool, dict]:
+    def __post_item(self, item_name: str, value: dict, is_method: bool,
+                    challenge: Optional[dict] = None) -> Tuple[bool, dict]:
         """
         Write a variable or execute a method.
 
@@ -114,32 +135,35 @@ class RESTClient:
         parameters the value parameter can be ignored.
 
         Args:
-            itemName: name of the item, i.e. variable name or method name
-            itemValue: parameters of the item, supplied as dictionary
-            isMethod: true, if the item is a method, false otherwise
+            item_name: name of the item, i.e. variable name or method name
+            value: parameters of the item, supplied as dictionary
+            is_method: true, if the item is a method, false otherwise
+            challenge: optional challenge from the sensor.
+            If not provided a new challenge is requested.
 
 
         Returns:
            bool: True if successful, false otherwise
            dict: Dictionary with the response from the sensor.
         """
-
-        header = self.__getAuthPostHeader(itemName)
-        requestDict = dict()
-        requestDict["header"] = header
+        if challenge is None:
+            challenge = self.get_challenge()
+        header = self.__get_auth_post_header(item_name, challenge)
+        request_dict = {}
+        request_dict["header"] = header
         if value is not None:
-            requestDict["data"] = dict()
-            if isMethod:
-                requestDict["data"] = value
+            request_dict["data"] = {}
+            if is_method:
+                request_dict["data"] = value
             else:
-                requestDict["data"][itemName] = value
-        request = json.dumps(requestDict)
-        response = requests.post(self.baseUrl+itemName, data=request)
-        success, resultDict = self.__evaluateRestResult(response)
+                request_dict["data"][item_name] = value
+        request = json.dumps(request_dict)
+        response = requests.post(self.base_url+item_name, data=request, timeout=5)
+        success, result_dict = self.__evaluate_rest_result(response)
 
-        return success, resultDict
+        return success, result_dict
 
-    def __evaluateRestResult(self, response:dict)->Tuple[bool, dict]:
+    def __evaluate_rest_result(self, response: dict) -> Tuple[bool, dict]:
         """
         Evaluate the result structure from the requests.post function
 
@@ -155,63 +179,72 @@ class RESTClient:
         if response.status_code == 200:
             result = json.loads(response.text)
             if result["header"]["status"] == 0:
-                status =  True
+                status = True
         return status, result
 
+    def get_challenge(self) -> dict:
+        """
+        Gets a challenge from the sensor
 
-    def __getAuthPostHeader(self, itemName:str) -> dict:
+        Returns:
+            dict: The challenge for the user
+        """
+
+        url = self.base_url + 'getChallenge'
+        request_payload = '{ "data": { "user": "' + self.user_level.name + '" } }'
+        r = requests.post(url, data=request_payload, timeout=5)
+        return r.json()["challenge"]
+
+    def __get_auth_post_header(self, item_name: str, challenge: dict) -> dict:
         """
         Create response to challenge from sensor
 
         Args:
-            itemName (str): Name of the item for which the response is computed
+            item_name (str): Name of the item for which the response is computed
+            challenge (dict): Challenge from the sensor
 
         Returns:
             dict: Computed response values as dictionary
         """
 
-        if self.username is None or self.password is None:
-            raise RuntimeError("Undefined user level or password. Call setUserLevel first.")
-
-        # get challenge from sensor
-        url = self.baseUrl + 'getChallenge'
-        requestPayload = '{ "data": { "user": "'+ self.username + '" } }'
-        r = requests.post(url, data=requestPayload)
-        chal = r.json()
-
         # parse the challenge
-        realm = chal['challenge']['realm']
-        nonce = chal['challenge']['nonce']
-        opaque = chal['challenge']['opaque']
+        realm = challenge['realm']
+        nonce = challenge['nonce']
+        opaque = challenge['opaque']
 
         # .encode() returns a bytes representation of the Unicode string
-        # For the password we use __stringToBytes since we allow here 
+        # For the password we use __stringToBytes since we allow here
         # only characters according to ISO 8859-15 (8Bit per characters)
-        # as input.
-        hstr1 = (self.username + ":" + realm + ":").encode() + self.__stringToBytes(self.password)
-        if 'salt' in chal['challenge']:
-            hstr1 += ":".encode() + bytes(chal['challenge']['salt'])
+        # as input. If Unicode characters are used in a password string,
+        # it can happen that different characters are mapped to the same
+        # byte value. Example: 'sick' and 'ųũţū' would be interpreted as equivalent
+        # passwords.
+        hstr1 = (self.user_level.name + ":" + realm + ":").encode() \
+            + self.__string_to_bytes(self.password)
+        if 'salt' in challenge:
+            hstr1 += ":".encode() + bytes(challenge['salt'])
         # Get the hashed data as a hex string
-        hash1 = hashlib.sha256(hstr1).hexdigest()
+        hash1 = sha256(hstr1).hexdigest()
 
-        methodType = 'POST'
-        hstr2 = (methodType + ":" + itemName).encode()
-        hash2 = hashlib.sha256(hstr2).hexdigest()
+        method_type = 'POST'
+        hstr2 = (method_type + ":" + item_name).encode()
+        hash2 = sha256(hstr2).hexdigest()
         hstr3 = (hash1 + ":" + nonce + ":" + hash2).encode()
-        response = hashlib.sha256(hstr3).hexdigest()
+        response = sha256(hstr3).hexdigest()
 
         # fill header
-        header = dict()
+        header = {}
         header['nonce'] = nonce
         header['opaque'] = opaque
         header['realm'] = realm
         header['response'] = response
-        header['user'] = self.username
+        header['user'] = self.user_level.name
         return header
 
-    def __stringToBytes(self, string:str) -> bytes:
+    def __string_to_bytes(self, string: str) -> bytes:
         """Converts a string to a byte array.
-        To determine the byte value of each character first its unicode value is computed and then the modulo 256 of this value is taken.
+        To determine the byte value of each character first its unicode value
+        is computed and then the modulo 256 of this value is taken.
 
         Args:
             string (str): The string that shall be converted.
@@ -219,4 +252,108 @@ class RESTClient:
         Returns:
             bytes: The byte representation of the string.
         """
-        return bytes(map(lambda char: ord(char) % 256, string))
+        bytes_of_string = bytearray()
+        for char in string:
+            bytes_of_string.append(ord(char) % 256)
+        return bytes(bytes_of_string)
+
+    def change_password(self, target_user_level: UserLevel, target_user_level_new_password: str) -> Tuple[bool, dict]:
+        """
+        Change the password for a user level
+        less than or equal to the current user level.
+
+        Args:
+            target_user_level (UserLevel): User level of the user whose password should be changed
+            target_user_level_new_password (str): New password for the user
+
+        Returns:
+            bool: True if successful, false otherwise
+            dict: Dictionary with the response from the sensor.
+        """
+
+        if target_user_level.value > self.user_level.value:
+            raise ValueError(
+                "The user level of the target user must be\
+                    less than or equal to the current user level.")
+
+        # Get a challenge from the sensor
+        challenge = self.get_challenge()
+        # Compute the hash of the password
+        password_hash = self.__get_password_hash(
+            bytes(challenge["salt"]),
+            challenge["realm"],
+            self.user_level.name, self.password, target_user_level.name,
+            target_user_level_new_password)
+
+        method_name = "changePassword"
+        body = {"userLevel": target_user_level.value,
+                "encryptedMessage": list(password_hash)}
+        success, result = self.call_method(method_name, body, challenge)
+        return success, result
+
+    def __get_password_hash(
+            self,
+            device_provided_salt: list[int],
+            realm: str,
+            invoker_user_level: UserLevel,
+            invoker_password: str,
+            target_user_level: UserLevel,
+            target_user_level_new_password: str) -> bytes:
+        """Calculate the password hash to change the REST password.
+        See the flow chart in the readme for a bigger picture.
+
+        This method generates a password hash for changing the REST password by performing the following steps:
+        1. Calculates the invoker's password hash using the invoker's user level, password, and the salt provided by the device.
+        2. Calculates the target user's new password hash using the target user's user level, new password, and client-generated salt.
+        3. Encrypts the target user's new password hash using the invoker's password hash as the AES encryption key and an initialization vector.
+        4. Calculates the HMAC of the encrypted password hash using the invoker's password hash as the HMAC key.
+
+        Args:
+            device_provided_salt (list[int]): Salt generated by the device
+            realm (str): Realm of the challenge
+            invoker_user_level (UserLevel): User level of the invoker
+            invoker_password (str): Password of the invoker
+            target_user_level (UserLevel): User level of the target user
+            target_user_level_new_password (str): New password for the target user
+
+        Returns:
+            bytes: The password hash
+        """
+        def utf8(s):
+            return s.encode("utf-8")
+
+        def _aes128_cbc_encrypt(data, key, iv):
+            cipher = AES.new(key, AES.MODE_CBC, iv)
+            return cipher.encrypt(data)
+
+        def _user_level_prefix(user_level, realm):
+            return user_level + ":" + realm + ":"
+
+        #  Step 1: calculate invoker password hash
+        invoker_password_and_level = utf8(_user_level_prefix(
+            invoker_user_level, realm) + invoker_password)
+        invoker_salted_password_hash = sha256(
+            invoker_password_and_level + utf8(":") + device_provided_salt).digest()
+
+        # Step 2: calculate target password hash
+        client_generated_salt = token_bytes(16)  # 128 random bits
+        target_new_password_and_level = utf8(_user_level_prefix(
+            target_user_level, realm) + target_user_level_new_password)
+        new_salted_password_hash = sha256(
+            target_new_password_and_level + utf8(":") + client_generated_salt).digest()
+
+        # Step 3: Encode new password
+        aes_encryption_key = invoker_salted_password_hash[:16]
+        initialization_vector = token_bytes(16)  # 128 random bits
+        encrypted_salted_new_password_hash = _aes128_cbc_encrypt(
+            new_salted_password_hash + client_generated_salt,
+            aes_encryption_key,
+            initialization_vector
+        )
+
+        # Step 4: Calculate HMAC
+        hmac_key = invoker_salted_password_hash
+        hmac_message = initialization_vector + encrypted_salted_new_password_hash
+        hmac_result = hmac.new(hmac_key, hmac_message, sha256).digest()
+
+        return hmac_message + hmac_result
