@@ -1,6 +1,6 @@
 include:
   - project: "GBC08/development/devices/shared/devicescripts/bu83_python_pipeline"
-    ref: 0.13.0
+    ref: 2.1.1
     file: "build-template.yaml"
 
 variables:
